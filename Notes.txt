@@ -1,0 +1,190 @@
+Colored and better formatted notes are available in Notes.md.
+Open Notes.md in Markdown Preview for best view.
+
+Git + GitHub + Auto Push Setup (From Scratch)
+
+1) Create GitHub Repository
+1. Go to GitHub and create a new repository named React-App.
+2. Keep it empty (do not add README/license) if your local project already has files.
+
+2) Open Project in Terminal
+1. Open terminal in your project folder.
+2. Run:
+
+git init
+git branch -M main
+
+3) Connect Local Project to GitHub
+1. Replace USERNAME and run:
+
+git remote add origin https://github.com/USERNAME/React-App.git
+
+2. If origin already exists, run:
+
+git remote set-url origin https://github.com/USERNAME/React-App.git
+
+3. Verify:
+
+git remote -v
+
+4) First Commit and Push
+Run:
+
+git add .
+git commit -m "Initial commit"
+git push -u origin main
+
+5) Add Automatic Add/Commit/Push Script
+Create file: scripts/auto-git-sync.ps1
+
+Paste this content:
+
+param(
+	[int]$DebounceSeconds = 8,
+	[string]$CommitMessagePrefix = "Auto sync"
+)
+
+$repoPath = Resolve-Path (Join-Path $PSScriptRoot "..")
+Set-Location $repoPath
+
+git rev-parse --is-inside-work-tree *> $null
+if ($LASTEXITCODE -ne 0) {
+	Write-Error "Not a git repository: $repoPath"
+	exit 1
+}
+
+$script:pending = $false
+$script:lastChange = Get-Date
+
+$watcher = New-Object System.IO.FileSystemWatcher
+$watcher.Path = $repoPath.Path
+$watcher.IncludeSubdirectories = $true
+$watcher.Filter = "*"
+$watcher.NotifyFilter = [System.IO.NotifyFilters]::FileName -bor [System.IO.NotifyFilters]::LastWrite -bor [System.IO.NotifyFilters]::DirectoryName
+
+$onChange = {
+	$changedPath = $Event.SourceEventArgs.FullPath
+
+	if ($null -eq $changedPath) {
+		return
+	}
+
+	if ($changedPath -match "\\.git\\" -or $changedPath -match "\\node_modules\\") {
+		return
+	}
+
+	$script:pending = $true
+	$script:lastChange = Get-Date
+}
+
+$subscriptions = @(
+	Register-ObjectEvent -InputObject $watcher -EventName Changed -Action $onChange
+	Register-ObjectEvent -InputObject $watcher -EventName Created -Action $onChange
+	Register-ObjectEvent -InputObject $watcher -EventName Deleted -Action $onChange
+	Register-ObjectEvent -InputObject $watcher -EventName Renamed -Action $onChange
+)
+
+$watcher.EnableRaisingEvents = $true
+
+Write-Host "Auto git sync is running in $($repoPath.Path)"
+Write-Host "Debounce: $DebounceSeconds seconds"
+Write-Host "Press Ctrl+C to stop"
+
+try {
+	while ($true) {
+		Start-Sleep -Seconds 2
+
+		if (-not $script:pending) {
+			continue
+		}
+
+		$idleSeconds = ((Get-Date) - $script:lastChange).TotalSeconds
+		if ($idleSeconds -lt $DebounceSeconds) {
+			continue
+		}
+
+		$script:pending = $false
+
+		git add -A
+		if ($LASTEXITCODE -ne 0) {
+			Write-Warning "git add failed. Waiting for next change..."
+			continue
+		}
+
+		$stagedChanges = git diff --cached --name-only
+		if ([string]::IsNullOrWhiteSpace($stagedChanges)) {
+			continue
+		}
+
+		$timestamp = Get-Date -Format "yyyy-MM-dd HH:mm:ss"
+		$message = "$CommitMessagePrefix $timestamp"
+
+		git commit -m $message
+		if ($LASTEXITCODE -ne 0) {
+			Write-Warning "git commit failed. Waiting for next change..."
+			continue
+		}
+
+		git push
+		if ($LASTEXITCODE -ne 0) {
+			Write-Warning "git push failed. Commit created locally; push manually when ready."
+			continue
+		}
+
+		Write-Host "Synced: $message"
+	}
+}
+finally {
+	$watcher.EnableRaisingEvents = $false
+	foreach ($sub in $subscriptions) {
+		Unregister-Event -SourceIdentifier $sub.Name -ErrorAction SilentlyContinue
+		$sub | Remove-Job -Force -ErrorAction SilentlyContinue
+	}
+	$watcher.Dispose()
+}
+
+6) Add npm Script in package.json
+Inside "scripts", add:
+
+"auto:sync": "powershell -ExecutionPolicy Bypass -File ./scripts/auto-git-sync.ps1"
+
+Example scripts block:
+
+"scripts": {
+  "dev": "vite",
+  "build": "vite build",
+  "lint": "eslint .",
+  "preview": "vite preview",
+  "auto:sync": "powershell -ExecutionPolicy Bypass -File ./scripts/auto-git-sync.ps1"
+}
+
+7) Commit This Setup Once
+Run:
+
+git add .
+git commit -m "Add auto git sync watcher"
+git push
+
+8) Start Auto Sync Every Time You Code
+Run:
+
+npm run auto:sync
+
+Keep this terminal open.
+
+9) Daily Workflow
+1. Open project.
+2. Run npm run auto:sync.
+3. Edit and save files.
+4. Script automatically adds, commits, and pushes.
+
+10) If VS Code Commit/Push Button Shows "Canceled"
+Use terminal directly:
+
+git add .
+git commit -m "your message"
+git push
+
+11) Optional (Recommended)
+Auto-commit on every save can create too many commits.
+For serious projects, prefer manual commits with meaningful messages.
