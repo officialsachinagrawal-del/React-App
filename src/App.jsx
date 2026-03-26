@@ -3,15 +3,16 @@ import './App.css'
 
 function App() {
 
+  console.log(import.meta.env.VITE_APPWRTE_URL);
+
 
   return (
     <>
 
-      <h1>Vite + React</h1>
-      <h2>You are looking good</h2>
-      <h2>You are looking good</h2>
-
-    </>
+    <h1 className='hover:scale-110 transition-transform duration-300'>
+  Billu Badmosh ki khde
+      </h1>
+    </> 
   )
 }
 
